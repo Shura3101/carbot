@@ -39,11 +39,19 @@ def fetch_car_from_page(url: str) -> Dict | None:
         return None
     try:
         # JSON-LD
-        jsonld_match = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
-        if jsonld_match:
-            data = json.loads(jsonld_match.group(1))
-            if isinstance(data, list):
-                data = data[0]
+        jsonld_blocks = re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
+data = None
+for block in jsonld_blocks:
+    try:
+        d = json.loads(block)
+        if isinstance(d, list): d = d[0]
+        if d.get("@type") == "Car":
+            data = d
+            break
+    except:
+        continue
+if not data:
+    return None
 
             title = data.get("name", "")
             offers = data.get("offers", {})
