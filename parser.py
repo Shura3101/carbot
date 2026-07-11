@@ -11,11 +11,11 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://auto.ria.com"
 
 SEARCH_URLS = [
-    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=3&price.USD.gte=30000&page={page}&size=20",   # BMW
-    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=1&price.USD.gte=30000&page={page}&size=20",   # Mercedes
-    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=49&price.USD.gte=30000&page={page}&size=20",  # Porsche
-    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=2&price.USD.gte=30000&page={page}&size=20",   # Audi
-    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=28&price.USD.gte=30000&page={page}&size=20",  # Lexus
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=3&price.USD.gte=30000&page={page}&size=20",
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=1&price.USD.gte=30000&page={page}&size=20",
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=49&price.USD.gte=30000&page={page}&size=20",
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=2&price.USD.gte=30000&page={page}&size=20",
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=28&price.USD.gte=30000&page={page}&size=20",
 ]
 
 HEADERS = {
@@ -38,55 +38,61 @@ def fetch_car_from_page(url: str) -> Dict | None:
     if not html:
         return None
     try:
-        # JSON-LD
-        jsonld_blocks = re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
-data = None
-for block in jsonld_blocks:
-    try:
-        d = json.loads(block)
-        if isinstance(d, list): d = d[0]
-        if d.get("@type") == "Car":
-            data = d
-            break
-    except:
-        continue
-if not data:
-    return None
+        # Ищем все JSON-LD блоки и берём тот где @type == Car
+        blocks = re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
+        data = None
+        for block in blocks:
+            try:
+                d = json.loads(block)
+                if isinstance(d, list):
+                    d = d[0]
+                if d.get("@type") == "Car":
+                    data = d
+                    break
+            except Exception:
+                continue
 
-            title = data.get("name", "")
-            offers = data.get("offers", {})
-            price_raw = offers.get("price", 0)
-            price = f"${int(float(price_raw)):,}".replace(",", " ") if price_raw else "Цена не указана"
+        if not data:
+            return None
 
-            image = data.get("image", None)
-            if isinstance(image, list):
-                image = image[0] if image else None
+        title = data.get("name", "")
+        offers = data.get("offers", {})
+        price_raw = offers.get("price", 0)
+        price = f"${int(float(price_raw)):,}".replace(",", " ") if price_raw else "Ціна не вказана"
 
-            year_match = re.search(r'"productionDate"\s*:\s*"?(\d{4})"?', html)
-            year = year_match.group(1) if year_match else "—"
+        image = data.get("image", None)
+        if isinstance(image, list):
+            image = image[0] if image else None
 
-            mileage_match = re.search(r'"mileageFromOdometer"[^}]*"value"\s*:\s*"?(\d+)"?', html, re.DOTALL)
-            mileage = f"{int(mileage_match.group(1)):,} км".replace(",", " ") if mileage_match else "—"
+        year = str(data.get("vehicleModelDate", "—"))
 
+        mileage_data = data.get("mileageFromOdometer", {})
+        mileage_val = mileage_data.get("value", 0) if isinstance(mileage_data, dict) else 0
+        mileage = f"{int(mileage_val):,} км".replace(",", " ") if mileage_val else "—"
+
+        location_data = data.get("offers", {}).get("availableAtOrFrom", {})
+        if isinstance(location_data, dict):
+            location = location_data.get("address", {}).get("addressLocality", "Україна")
+        else:
             location_match = re.search(r'"addressLocality"\s*:\s*"([^"]+)"', html)
             location = location_match.group(1) if location_match else "Україна"
 
-            id_match = re.search(r'_(\d+)\.html', url)
-            car_id = id_match.group(1) if id_match else url[-10:]
+        id_match = re.search(r'_(\d+)\.html', url)
+        car_id = id_match.group(1) if id_match else url[-10:]
 
-            if not title:
-                return None
+        if not title:
+            return None
 
-            return {
-                "id": car_id,
-                "title": title,
-                "price": price,
-                "year": year,
-                "mileage": mileage,
-                "location": location,
-                "photo": image,
-                "url": url,
-            }
+        return {
+            "id": car_id,
+            "title": title,
+            "price": price,
+            "year": year,
+            "mileage": mileage,
+            "location": location,
+            "photo": image,
+            "url": url,
+        }
     except Exception as e:
         logger.error(f"Ошибка парсинга {url}: {e}")
     return None
@@ -104,13 +110,12 @@ async def scrape_premium_cars(count: int = 15) -> List[Dict]:
         if html:
             links = re.findall(r'href="(/uk/auto[^"]+\.html)"', html)
             links = list(set(links))
-            full_links = [BASE_URL + l for l in links]
-            all_links.extend(full_links)
-            logger.info(f"Найдено {len(links)} ссылок")
+            all_links.extend([BASE_URL + l for l in links])
+            logger.info(f"Знайдено {len(links)} посилань")
         await asyncio.sleep(1)
 
     if not all_links:
-        logger.warning("Ссылки не найдены")
+        logger.warning("Посилання не знайдені")
         return []
 
     random.shuffle(all_links)
@@ -124,5 +129,5 @@ async def scrape_premium_cars(count: int = 15) -> List[Dict]:
             break
         await asyncio.sleep(1)
 
-    logger.info(f"Итого: {len(cars)} тачек")
+    logger.info(f"Всього: {len(cars)} авто")
     return cars[:count]
