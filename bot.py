@@ -66,16 +66,17 @@ def make_reaction_keyboard(car_id: str):
         ]
     ])
 
-async def send_cars_batch():
-    logger.info("Парсим тачки с auto.ria.com...")
+async def send_cars_batch(chat_id=None):
+    if chat_id is None:
+        chat_id = CHAT_ID
+    logger.info("Парсим тачки...")
     try:
         cars = await scrape_premium_cars(count=random.randint(10, 20))
     except Exception as e:
-        logger.error(f"Ошибка парсинга: {e}")
+        logger.error(f"Ошибка: {e}")
         return
 
     if not cars:
-        logger.warning("Машины не найдены")
         return
 
     hour = datetime.now().hour
@@ -86,7 +87,7 @@ async def send_cars_batch():
     else:
         greeting = "🌙 Вечерний заезд. Выбирайте мечту"
 
-    await bot.send_message(CHAT_ID, f"{greeting} — {len(cars)} тачек с auto.ria.com 🚗\n\nЛайкайте, дизлайкайте, обсуждайте!")
+    await bot.send_message(chat_id, f"{greeting} — {len(cars)} тачек 🚗\n\nЛайкайте, дизлайкайте, обсуждайте!")
 
     for car in cars:
         caption = (
@@ -94,16 +95,16 @@ async def send_cars_batch():
             f"💰 {car['price']}\n"
             f"📅 {car['year']} • 🛣 {car['mileage']}\n"
             f"📍 {car['location']}\n"
-            f"🔗 [Смотреть на auto.ria]({car['url']})"
+            f"🔗 [Подробнее]({car['url']})"
         )
         try:
             if car.get("photo"):
-                await bot.send_photo(CHAT_ID, photo=car["photo"], caption=caption, parse_mode="Markdown", reply_markup=make_reaction_keyboard(car["id"]))
+                await bot.send_photo(chat_id, photo=car["photo"], caption=caption, parse_mode="Markdown", reply_markup=make_reaction_keyboard(car["id"]))
             else:
-                await bot.send_message(CHAT_ID, text=caption, parse_mode="Markdown", reply_markup=make_reaction_keyboard(car["id"]))
+                await bot.send_message(chat_id, text=caption, parse_mode="Markdown", reply_markup=make_reaction_keyboard(car["id"]))
         except Exception as e:
             logger.error(f"Ошибка отправки {car['title']}: {e}")
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(1)
 
 @dp.callback_query(F.data.startswith("like:"))
 async def handle_like(callback: types.CallbackQuery):
@@ -133,12 +134,12 @@ async def handle_discuss(callback: types.CallbackQuery):
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    await message.answer("🏎 *CarBot запущен!*\n\nКаждый день в 9:00, 14:00 и 20:00 буду присылать горячие тачки с auto.ria.com\n\nКоманды:\n/cars — получить тачки прямо сейчас\n/top — топ тачек по лайкам", parse_mode="Markdown")
+    await message.answer("🏎 *CarBot запущен!*\n\nКаждый день в 9:00, 14:00 и 20:00 буду присылать горячие тачки\n\nКоманды:\n/cars — получить тачки прямо сейчас\n/top — топ тачек по лайкам", parse_mode="Markdown")
 
 @dp.message(Command("cars"))
 async def cmd_cars(message: types.Message):
-    await message.answer("⏳ Парсю auto.ria.com, подожди секунду...")
-    await send_cars_batch()
+    await message.answer("⏳ Загружаю тачки, подожди секунду...")
+    await send_cars_batch(message.chat.id)
 
 @dp.message(Command("top"))
 async def cmd_top(message: types.Message):
@@ -149,7 +150,7 @@ async def cmd_top(message: types.Message):
     sorted_cars = sorted(data.items(), key=lambda x: len(x[1].get("likes", [])), reverse=True)[:5]
     text = "🏆 *Топ тачек по лайкам:*\n\n"
     for i, (car_id, reactions) in enumerate(sorted_cars, 1):
-        text += f"{i}. `{car_id[:20]}...`\n   🔥 {len(reactions.get('likes', []))} | 👎 {len(reactions.get('dislikes', []))}\n\n"
+        text += f"{i}. 🔥 {len(reactions.get('likes', []))} | 👎 {len(reactions.get('dislikes', []))}\n\n"
     await message.answer(text, parse_mode="Markdown")
 
 async def main():
