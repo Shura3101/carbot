@@ -3,110 +3,141 @@ import logging
 import random
 import json
 import urllib.request
+import re
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
-PREMIUM_BRANDS = {
-    "bmw": "3",
-    "mercedes": "1",
-    "porsche": "49",
-    "audi": "2",
-    "lexus": "28",
-    "land-rover": "34",
-    "maserati": "44",
-    "bentley": "78",
-    "ferrari": "80",
-    "lamborghini": "81",
+SEARCH_URLS = [
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=3&price.USD.gte=30000&abroad.not=-1&custom.not=-1&page={page}&size=20",   # BMW
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=1&price.USD.gte=30000&abroad.not=-1&custom.not=-1&page={page}&size=20",   # Mercedes
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=49&price.USD.gte=30000&abroad.not=-1&custom.not=-1&page={page}&size=20",  # Porsche
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=2&price.USD.gte=30000&abroad.not=-1&custom.not=-1&page={page}&size=20",   # Audi
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=28&price.USD.gte=30000&abroad.not=-1&custom.not=-1&page={page}&size=20",  # Lexus
+]
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "uk-UA,uk;q=0.9",
 }
 
-def fetch_url(url: str) -> dict | None:
+def fetch_html(url: str) -> str | None:
     try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json",
-        })
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read().decode())
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.read().decode("utf-8", errors="ignore")
     except Exception as e:
         logger.error(f"Ошибка запроса {url}: {e}")
         return None
 
-def fetch_car_ids(brand_id: str, page: int = 0) -> List[int]:
-    url = (
-        f"https://auto.ria.com/api/search/auto"
-        f"?brand.id[0]={brand_id}"
-        f"&price.gte=30000"
-        f"&category_id=1"
-        f"&page={page}"
-        f"&countpage=20"
-        f"&with_photo=1"
-    )
-    data = fetch_url(url)
-    if not data:
-        return []
-    return data.get("result", {}).get("search_result", {}).get("ids", [])
+def parse_cars_from_search(html: str) -> List[Dict]:
+    cars = []
+    # Ищем JSON данные машин в HTML
+    pattern = r'"@type"\s*:\s*"Car".*?"url"\s*:\s*"([^"]+)"'
+    
+    # Альтернативный подход - ищем блоки с данными
+    # Ищем ссылки на объявления
+    links = re.findall(r'href="(https://auto\.ria\.com/uk/auto_[^"]+\.html)"', html)
+    links = list(set(links))
+    
+    # Ищем цены
+    prices = re.findall(r'"price[Usd]?"[:\s]+"?(\d+)"?', html)
+    
+    for i, link in enumerate(links[:20]):
+        # Извлекаем ID из ссылки
+        id_match = re.search(r'auto_(\w+)_(\d+)\.html', link)
+        if not id_match:
+            continue
+        car_id = id_match.group(2)
+        
+        cars.append({
+            "id": car_id,
+            "url": link,
+            "needs_detail": True
+        })
+    
+    return cars
 
-def fetch_car_details(car_id: int) -> Dict | None:
-    url = f"https://auto.ria.com/api/info/car?langId=4&auto_id={car_id}"
-    data = fetch_url(url)
-    if not data:
+def fetch_car_from_page(url: str) -> Dict | None:
+    html = fetch_html(url)
+    if not html:
         return None
+    
     try:
-        price_usd = data.get("USD", 0)
-        price = f"${price_usd:,}".replace(",", " ") if price_usd else "Цена не указана"
-        mileage_raw = data.get("raceInt", 0)
-        mileage = f"{mileage_raw:,} км".replace(",", " ") if mileage_raw else "—"
-        photo_url = data.get("photoData", {}).get("seoLinkF", None)
-        city = data.get("locationCityName", "")
-        region = data.get("regionName", "")
-        location = ", ".join(filter(None, [city, region])) or "Украина"
-        brand = data.get("markName", "")
-        model = data.get("modelName", "")
-        year = data.get("year", "")
-        title = f"{brand} {model} {year}".strip()
-        return {
-            "id": str(car_id),
-            "title": title or f"Авто #{car_id}",
-            "price": price,
-            "year": str(year) if year else "—",
-            "mileage": mileage,
-            "location": location,
-            "photo": photo_url,
-            "url": f"https://auto.ria.com/auto_{car_id}.html",
-        }
+        # Ищем JSON-LD данные
+        jsonld = re.search(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
+        if jsonld:
+            data = json.loads(jsonld.group(1))
+            if isinstance(data, list):
+                data = data[0]
+            
+            title = data.get("name", "")
+            price_raw = data.get("offers", {}).get("price", 0)
+            price = f"${int(price_raw):,}".replace(",", " ") if price_raw else "Цена не указана"
+            image = data.get("image", [None])
+            if isinstance(image, list):
+                image = image[0] if image else None
+            
+            # Год и пробег из HTML
+            year_match = re.search(r'"releaseDate"\s*:\s*"(\d{4})', html)
+            year = year_match.group(1) if year_match else "—"
+            
+            mileage_match = re.search(r'"mileageFromOdometer".*?"value"\s*:\s*"?(\d+)"?', html, re.DOTALL)
+            mileage = f"{int(mileage_match.group(1)):,} км".replace(",", " ") if mileage_match else "—"
+            
+            location_match = re.search(r'"addressLocality"\s*:\s*"([^"]+)"', html)
+            location = location_match.group(1) if location_match else "Украина"
+            
+            id_match = re.search(r'auto_\w+_(\d+)\.html', url)
+            car_id = id_match.group(1) if id_match else url
+            
+            return {
+                "id": car_id,
+                "title": title,
+                "price": price,
+                "year": year,
+                "mileage": mileage,
+                "location": location,
+                "photo": image,
+                "url": url,
+            }
     except Exception as e:
-        logger.error(f"Ошибка обработки car_id={car_id}: {e}")
-        return None
+        logger.error(f"Ошибка парсинга страницы {url}: {e}")
+    
+    return None
 
 async def scrape_premium_cars(count: int = 15) -> List[Dict]:
     cars = []
-    brand_ids = list(PREMIUM_BRANDS.values())
-    random.shuffle(brand_ids)
-
-    all_ids = []
-    for brand_id in brand_ids:
-        if len(all_ids) >= count * 3:
-            break
-        page = random.randint(0, 3)
-        ids = await asyncio.to_thread(fetch_car_ids, brand_id, page)
-        all_ids.extend(ids)
-        await asyncio.sleep(0.3)
-
-    if not all_ids:
-        logger.warning("Не удалось получить ID машин")
+    random.shuffle(SEARCH_URLS)
+    
+    all_links = []
+    for url_template in SEARCH_URLS[:3]:
+        page = random.randint(0, 5)
+        url = url_template.format(page=page)
+        html = await asyncio.to_thread(fetch_html, url)
+        if html:
+            # Извлекаем ссылки на машины
+            links = re.findall(r'href="(https://auto\.ria\.com/uk/auto_[^"]+\.html)"', html)
+            links = list(set(links))
+            all_links.extend(links)
+            logger.info(f"Найдено {len(links)} ссылок с {url[:50]}")
+        await asyncio.sleep(1)
+    
+    if not all_links:
+        logger.warning("Ссылки не найдены")
         return []
-
-    random.shuffle(all_ids)
-    selected_ids = all_ids[:count * 2]
-
-    for car_id in selected_ids:
-        result = await asyncio.to_thread(fetch_car_details, car_id)
-        if result:
+    
+    random.shuffle(all_links)
+    
+    for link in all_links[:count * 2]:
+        result = await asyncio.to_thread(fetch_car_from_page, link)
+        if result and result.get("title"):
             cars.append(result)
+            logger.info(f"✅ {result['title']} — {result['price']}")
         if len(cars) >= count:
             break
-        await asyncio.sleep(0.5)
-
-    logger.info(f"Найдено {len(cars)} тачек")
+        await asyncio.sleep(1)
+    
+    logger.info(f"Итого найдено: {len(cars)} тачек")
     return cars[:count]
