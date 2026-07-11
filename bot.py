@@ -4,9 +4,8 @@ import os
 import json
 import random
 from datetime import datetime
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from parser import scrape_premium_cars
 
@@ -14,11 +13,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")  # ID группового чата
+CHAT_ID = os.getenv("CHAT_ID")
 DATA_FILE = "data/reactions.json"
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(bot)
 scheduler = AsyncIOScheduler()
 
 # ─── Хранилище реакций ───────────────────────────────────────────────────────
@@ -42,19 +41,15 @@ def toggle_reaction(car_id: str, user_id: int, reaction: str):
     data = load_data()
     if car_id not in data:
         data[car_id] = {"likes": [], "dislikes": []}
-
     opposite = "dislikes" if reaction == "likes" else "likes"
-
     if user_id in data[car_id][opposite]:
         data[car_id][opposite].remove(user_id)
-
     if user_id in data[car_id][reaction]:
         data[car_id][reaction].remove(user_id)
         action = "removed"
     else:
         data[car_id][reaction].append(user_id)
         action = "added"
-
     save_data(data)
     return action, data[car_id]
 
@@ -64,25 +59,13 @@ def make_reaction_keyboard(car_id: str):
     reactions = get_car_reactions(car_id)
     likes = len(reactions["likes"])
     dislikes = len(reactions["dislikes"])
-
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(
-                text=f"🔥 Огонь! ({likes})",
-                callback_data=f"like:{car_id}"
-            ),
-            InlineKeyboardButton(
-                text=f"👎 Не то ({dislikes})",
-                callback_data=f"dislike:{car_id}"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                text="💬 Обсудить",
-                callback_data=f"discuss:{car_id}"
-            )
-        ]
-    ])
+    keyboard = types.InlineKeyboardMarkup()
+    keyboard.row(
+        types.InlineKeyboardButton(f"🔥 Огонь! ({likes})", callback_data=f"like:{car_id}"),
+        types.InlineKeyboardButton(f"👎 Не то ({dislikes})", callback_data=f"dislike:{car_id}")
+    )
+    keyboard.add(types.InlineKeyboardButton("💬 Обсудить", callback_data=f"discuss:{car_id}"))
+    return keyboard
 
 # ─── Отправка пачки машин ────────────────────────────────────────────────────
 
@@ -108,8 +91,7 @@ async def send_cars_batch():
 
     await bot.send_message(
         CHAT_ID,
-        f"{greeting} — {len(cars)} тачек с auto.ria.com 🚗\n\n"
-        f"👇 Лайкайте, дизлайкайте, обсуждайте!"
+        f"{greeting} — {len(cars)} тачек с auto.ria.com 🚗\n\nЛайкайте, дизлайкайте, обсуждайте!"
     )
 
     for car in cars:
@@ -120,10 +102,9 @@ async def send_cars_batch():
             f"📍 {car['location']}\n"
             f"🔗 [Смотреть на auto.ria]({car['url']})"
         )
-
         try:
             if car.get("photo"):
-                msg = await bot.send_photo(
+                await bot.send_photo(
                     CHAT_ID,
                     photo=car["photo"],
                     caption=caption,
@@ -131,7 +112,7 @@ async def send_cars_batch():
                     reply_markup=make_reaction_keyboard(car["id"])
                 )
             else:
-                msg = await bot.send_message(
+                await bot.send_message(
                     CHAT_ID,
                     text=caption,
                     parse_mode="Markdown",
@@ -140,50 +121,38 @@ async def send_cars_batch():
                 )
         except Exception as e:
             logger.error(f"Ошибка отправки {car['title']}: {e}")
-
-        await asyncio.sleep(1.5)  # небольшая задержка между фото
+        await asyncio.sleep(1.5)
 
 # ─── Обработчики кнопок ──────────────────────────────────────────────────────
 
-@dp.callback_query(F.data.startswith("like:"))
+@dp.callback_query_handler(lambda c: c.data.startswith("like:"))
 async def handle_like(callback: types.CallbackQuery):
     car_id = callback.data.split(":", 1)[1]
-    user_id = callback.from_user.id
-    action, reactions = toggle_reaction(car_id, user_id, "likes")
-
+    action, _ = toggle_reaction(car_id, callback.from_user.id, "likes")
     msg = "🔥 Огонь!" if action == "added" else "Убрал лайк"
-    await callback.answer(msg, show_alert=False)
-
+    await callback.answer(msg)
     try:
-        await callback.message.edit_reply_markup(
-            reply_markup=make_reaction_keyboard(car_id)
-        )
+        await callback.message.edit_reply_markup(reply_markup=make_reaction_keyboard(car_id))
     except Exception:
         pass
 
-@dp.callback_query(F.data.startswith("dislike:"))
+@dp.callback_query_handler(lambda c: c.data.startswith("dislike:"))
 async def handle_dislike(callback: types.CallbackQuery):
     car_id = callback.data.split(":", 1)[1]
-    user_id = callback.from_user.id
-    action, reactions = toggle_reaction(car_id, user_id, "dislikes")
-
+    action, _ = toggle_reaction(car_id, callback.from_user.id, "dislikes")
     msg = "👎 Не твоя тачка" if action == "added" else "Убрал дизлайк"
-    await callback.answer(msg, show_alert=False)
-
+    await callback.answer(msg)
     try:
-        await callback.message.edit_reply_markup(
-            reply_markup=make_reaction_keyboard(car_id)
-        )
+        await callback.message.edit_reply_markup(reply_markup=make_reaction_keyboard(car_id))
     except Exception:
         pass
 
-@dp.callback_query(F.data.startswith("discuss:"))
+@dp.callback_query_handler(lambda c: c.data.startswith("discuss:"))
 async def handle_discuss(callback: types.CallbackQuery):
     car_id = callback.data.split(":", 1)[1]
     reactions = get_car_reactions(car_id)
     likes = len(reactions["likes"])
     dislikes = len(reactions["dislikes"])
-
     await callback.answer(
         f"🔥 {likes} огонь | 👎 {dislikes} не то\nПиши мнение прямо в чат!",
         show_alert=True
@@ -191,7 +160,7 @@ async def handle_discuss(callback: types.CallbackQuery):
 
 # ─── Команды ─────────────────────────────────────────────────────────────────
 
-@dp.message(Command("start"))
+@dp.message_handler(commands=["start"])
 async def cmd_start(message: types.Message):
     await message.answer(
         "🏎 *CarBot запущен!*\n\n"
@@ -203,43 +172,37 @@ async def cmd_start(message: types.Message):
         parse_mode="Markdown"
     )
 
-@dp.message(Command("cars"))
+@dp.message_handler(commands=["cars"])
 async def cmd_cars(message: types.Message):
     await message.answer("⏳ Парсю auto.ria.com, подожди секунду...")
     await send_cars_batch()
 
-@dp.message(Command("top"))
+@dp.message_handler(commands=["top"])
 async def cmd_top(message: types.Message):
     data = load_data()
     if not data:
         await message.answer("Пока нет лайков. Оцените тачки!")
         return
-
     sorted_cars = sorted(
         data.items(),
         key=lambda x: len(x[1].get("likes", [])),
         reverse=True
     )[:5]
-
     text = "🏆 *Топ тачек по лайкам:*\n\n"
     for i, (car_id, reactions) in enumerate(sorted_cars, 1):
         likes = len(reactions.get("likes", []))
         dislikes = len(reactions.get("dislikes", []))
-        text += f"{i}. ID: `{car_id[:20]}...`\n   🔥 {likes} | 👎 {dislikes}\n\n"
-
+        text += f"{i}. `{car_id[:20]}...`\n   🔥 {likes} | 👎 {dislikes}\n\n"
     await message.answer(text, parse_mode="Markdown")
 
 # ─── Запуск ──────────────────────────────────────────────────────────────────
 
-async def main():
-    # Расписание: 9:00, 14:00, 20:00
+async def on_startup(_):
     scheduler.add_job(send_cars_batch, "cron", hour=9, minute=0)
     scheduler.add_job(send_cars_batch, "cron", hour=14, minute=0)
     scheduler.add_job(send_cars_batch, "cron", hour=20, minute=0)
     scheduler.start()
-
     logger.info("🚗 CarBot запущен!")
-    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    executor.start_polling(dp, on_startup=on_startup, skip_updates=True)
