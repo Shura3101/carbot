@@ -1,42 +1,116 @@
+import asyncio
+import logging
 import random
+import json
+import urllib.request
+import re
 from typing import List, Dict
 
-PREMIUM_CARS = [
-    {"title": "BMW M5 Competition 2021", "price": "$89 500", "year": "2021", "mileage": "12 000 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/4/44/2021_BMW_M5_Competition_%28F90%2C_facelift%2C_black%29%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=3&model.id[0]=4&price.USD.gte=80000"},
-    {"title": "Mercedes-AMG G63 2021", "price": "$198 000", "year": "2021", "mileage": "22 000 км", "location": "Одеса", "photo": "https://upload.wikimedia.org/wikipedia/commons/b/b6/Mercedes-AMG_G_63_%28W_463%2C_facelift_2018%29%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=1&model.id[0]=20&price.USD.gte=150000"},
-    {"title": "Porsche 911 Turbo S 2021", "price": "$215 000", "year": "2021", "mileage": "6 200 км", "location": "Львів", "photo": "https://upload.wikimedia.org/wikipedia/commons/b/b5/2021_Porsche_911_Turbo_S_%28992%29%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=49&model.id[0]=9&price.USD.gte=180000"},
-    {"title": "Audi RS6 Avant 2020", "price": "$112 000", "year": "2020", "mileage": "18 000 км", "location": "Харків", "photo": "https://upload.wikimedia.org/wikipedia/commons/8/82/Audi_RS_6_Avant_%28C8%29_IMG_3112.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=2&model.id[0]=119&price.USD.gte=90000"},
-    {"title": "BMW X5 M Competition 2020", "price": "$135 000", "year": "2020", "mileage": "14 000 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/a/a2/2020_BMW_X5_M_Competition_%28F95%29%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=3&model.id[0]=118&price.USD.gte=110000"},
-    {"title": "Bentley Continental GT 2020", "price": "$320 000", "year": "2020", "mileage": "11 000 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/5/5c/2020_Bentley_Continental_GT_V8%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=78&price.USD.gte=250000"},
-    {"title": "Audi R8 V10 Performance 2020", "price": "$185 000", "year": "2020", "mileage": "4 100 км", "location": "Дніпро", "photo": "https://upload.wikimedia.org/wikipedia/commons/e/e3/2020_Audi_R8_V10_Performance_%284S%2C_facelift%29%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=2&model.id[0]=167&price.USD.gte=150000"},
-    {"title": "Rolls-Royce Ghost 2021", "price": "$450 000", "year": "2021", "mileage": "6 700 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/0/06/2021_Rolls-Royce_Ghost_%28facelift%2C_silver%29%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=79&price.USD.gte=350000"},
-    {"title": "Ferrari F8 Tributo 2020", "price": "$340 000", "year": "2020", "mileage": "3 100 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/1/1b/2020_Ferrari_F8_Tributo%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=80&price.USD.gte=300000"},
-    {"title": "Ferrari Roma 2020", "price": "$245 000", "year": "2020", "mileage": "3 500 км", "location": "Дніпро", "photo": "https://upload.wikimedia.org/wikipedia/commons/1/1e/2020_Ferrari_Roma%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=80&price.USD.gte=200000"},
-    {"title": "BMW M8 Competition 2020", "price": "$138 000", "year": "2020", "mileage": "9 300 км", "location": "Львів", "photo": "https://upload.wikimedia.org/wikipedia/commons/8/8b/2020_BMW_M8_Competition_Coupe_%28F92%29%2C_front_8.15.21.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=3&model.id[0]=316&price.USD.gte=110000"},
-    {"title": "Maserati MC20 2020", "price": "$265 000", "year": "2020", "mileage": "2 800 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/c/c4/Maserati_MC20_%282020%29_-_Frontansicht%2C_5._September_2020%2C_Modena.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=44&price.USD.gte=200000"},
-    {"title": "Porsche Cayenne Turbo GT 2022", "price": "$192 000", "year": "2022", "mileage": "5 400 км", "location": "Львів", "photo": "https://upload.wikimedia.org/wikipedia/commons/4/4a/Porsche_Cayenne_Turbo_GT_%28I%29%2C_Frontansicht%2C_14._April_2022%2C_D%C3%BCsseldorf.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=49&model.id[0]=73&price.USD.gte=150000"},
-    {"title": "Bentley Bentayga 2016", "price": "$245 000", "year": "2016", "mileage": "28 000 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/d/d0/Bentley_Bentayga_%282016%29_%2833039081045%29.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=78&price.USD.gte=200000"},
-    {"title": "Lamborghini Urus 2018", "price": "$245 000", "year": "2018", "mileage": "15 000 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/a/a7/Lamborghini_Urus_2018_-_front.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=81&price.USD.gte=200000"},
-    {"title": "Range Rover Sport SVR 2017", "price": "$145 000", "year": "2017", "mileage": "35 000 км", "location": "Одеса", "photo": "https://upload.wikimedia.org/wikipedia/commons/c/c0/Range_Rover_Sport_SVR_%282017%29_%2833107882Guards_Red%29.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=34&price.USD.gte=100000"},
-    {"title": "Porsche Panamera Turbo S 2022", "price": "$205 000", "year": "2022", "mileage": "16 000 км", "location": "Харків", "photo": "https://upload.wikimedia.org/wikipedia/commons/f/ff/Porsche_Panamera_Turbo_S_E-Hybrid_%28971%29%2C_Frontansicht%2C_15._April_2022%2C_D%C3%BCsseldorf.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=49&model.id[0]=15&price.USD.gte=170000"},
-    {"title": "Lexus LX 600 2022", "price": "$115 000", "year": "2022", "mileage": "14 000 км", "location": "Одеса", "photo": "https://upload.wikimedia.org/wikipedia/commons/8/8e/2022_Lexus_LX_600_Ultra_Luxury_%28facelift%2C_black%29%2C_front_8.2.22.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=28&price.USD.gte=90000"},
-    {"title": "Mercedes-AMG GT 63S 2019", "price": "$155 000", "year": "2019", "mileage": "25 000 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/5/55/Mercedes-AMG_GT_63_S_4MATIC%2B_%28X290%29_%E2%80%93_Frontansicht%2C_25._Oktober_2018%2C_D%C3%BCsseldorf.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=1&model.id[0]=276&price.USD.gte=130000"},
-    {"title": "Lamborghini Huracán EVO 2022", "price": "$310 000", "year": "2022", "mileage": "4 200 км", "location": "Київ", "photo": "https://upload.wikimedia.org/wikipedia/commons/b/b0/Lamborghini_Huracan_Evo_%28orange%29%2C_Frontansicht%2C_14._April_2022%2C_D%C3%BCsseldorf.jpg", "url": "https://auto.ria.com/uk/search/?brand.id[0]=81&price.USD.gte=280000"},
+logger = logging.getLogger(__name__)
+
+BASE_URL = "https://auto.ria.com"
+
+SEARCH_URLS = [
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=3&price.USD.gte=30000&page={page}&size=20",
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=1&price.USD.gte=30000&page={page}&size=20",
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=49&price.USD.gte=30000&page={page}&size=20",
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=2&price.USD.gte=30000&page={page}&size=20",
+    "https://auto.ria.com/uk/search/?category_id=1&brand.id[0]=28&price.USD.gte=30000&page={page}&size=20",
 ]
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Accept-Language": "uk-UA,uk;q=0.9",
+}
+
+def fetch_html(url: str) -> str | None:
+    try:
+        req = urllib.request.Request(url, headers=HEADERS)
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        logger.error(f"Ошибка: {e}")
+        return None
+
+def parse_car_page(url: str) -> Dict | None:
+    html = fetch_html(url)
+    if not html:
+        return None
+    try:
+        blocks = re.findall(r'<script type="application/ld\+json">(.*?)</script>', html, re.DOTALL)
+        data = None
+        for block in blocks:
+            try:
+                d = json.loads(block)
+                if isinstance(d, list): d = d[0]
+                if d.get("@type") in ("Car", "Vehicle"):
+                    data = d
+                    break
+            except:
+                continue
+        if not data:
+            return None
+
+        title = data.get("name", "")
+        if not title:
+            return None
+
+        price_raw = data.get("offers", {}).get("price", 0)
+        price = f"${int(float(price_raw)):,}".replace(",", " ") if price_raw else "—"
+
+        year = str(data.get("vehicleModelDate", "—"))
+
+        mileage_data = data.get("mileageFromOdometer", {})
+        mileage_val = mileage_data.get("value", 0) if isinstance(mileage_data, dict) else 0
+        mileage = f"{int(mileage_val):,} км".replace(",", " ") if mileage_val else "—"
+
+        location_match = re.search(r'"addressLocality"\s*:\s*"([^"]+)"', html)
+        location = location_match.group(1) if location_match else "Україна"
+
+        id_match = re.search(r'_(\d+)\.html', url)
+        car_id = id_match.group(1) if id_match else url[-10:]
+
+        return {
+            "id": car_id,
+            "title": title,
+            "price": price,
+            "year": year,
+            "mileage": mileage,
+            "location": location,
+            "photo": None,
+            "url": url,
+        }
+    except Exception as e:
+        logger.error(f"Ошибка парсинга {url}: {e}")
+    return None
+
 async def scrape_premium_cars(count: int = 15) -> List[Dict]:
-    cars = PREMIUM_CARS.copy()
-    random.shuffle(cars)
-    result = []
-    for i, car in enumerate(cars[:count]):
-        result.append({
-            "id": str(i),
-            "title": car["title"],
-            "price": car["price"],
-            "year": car["year"],
-            "mileage": car["mileage"],
-            "location": car["location"],
-            "photo": car["photo"],
-            "url": car["url"],
-        })
-    return result
+    cars = []
+    urls = SEARCH_URLS.copy()
+    random.shuffle(urls)
+
+    all_links = []
+    for url_template in urls[:3]:
+        page = random.randint(0, 5)
+        url = url_template.format(page=page)
+        html = await asyncio.to_thread(fetch_html, url)
+        if html:
+            links = re.findall(r'href="(/uk/auto[^"]+\.html)"', html)
+            links = list(set(links))
+            all_links.extend([BASE_URL + l for l in links])
+        await asyncio.sleep(1)
+
+    if not all_links:
+        return []
+
+    random.shuffle(all_links)
+
+    for link in all_links[:count * 2]:
+        result = await asyncio.to_thread(parse_car_page, link)
+        if result:
+            cars.append(result)
+        if len(cars) >= count:
+            break
+        await asyncio.sleep(1)
+
+    return cars[:count]
