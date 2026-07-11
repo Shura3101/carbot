@@ -46,7 +46,7 @@ def fetch_car_from_page(url: str) -> Dict | None:
                 d = json.loads(block)
                 if isinstance(d, list):
                     d = d[0]
-                if d.get("@type") == "Car":
+                if d.get("@type") in ("Car", "Vehicle"):
                     data = d
                     break
             except Exception:
